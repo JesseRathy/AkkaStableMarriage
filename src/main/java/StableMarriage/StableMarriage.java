@@ -1,0 +1,325 @@
+package question2;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Random;
+import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import akka.actor.Inbox;
+import akka.actor.Props;
+import akka.actor.UntypedActor;
+import akka.pattern.Patterns;
+import akka.util.Timeout;
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.Duration;
+
+
+
+public class StableMarriage {
+
+    private enum Initialize {
+        START, FINISHED, 
+    }
+    private enum Message {
+        ENGAGE, DUMP,
+    };
+
+    private static class Proposal implements Serializable {
+        public String message;
+        public ActorRef partner;
+
+        public Proposal(ActorRef p) {
+            this.message = "propose";
+            this.partner = p;
+        }
+    }
+
+    // Represents the 2 possible messages the woman can send to men
+    private enum WomanResp {
+        YES, NO
+    };
+
+    static ArrayList<ActorRef> males = new ArrayList<ActorRef>();
+    static ArrayList<ActorRef> females = new ArrayList<ActorRef>();
+
+    public static class MaleActor extends UntypedActor {
+        // the preferences of each male actor
+        ArrayList<Integer> malePrefs = new ArrayList<Integer>();
+
+
+        int indexLastProposed = -1;
+
+        // both men and women need to know how many women and men there are, respectively
+        // n men, n women, but how to get?
+
+
+        @Override
+        public void onReceive(Object message) throws Throwable {
+            if (message instanceof Initialize) {
+                if (message == Initialize.START) {
+
+                    int n = females.size();
+                    // then set random value from 1-n for each person of the opposite sex.
+
+                    for (int i = 1; i <= n; i++) {
+                        malePrefs.add(i);
+                        Collections.shuffle(malePrefs);
+                    }
+                    // Collections.shuffle(malePrefs);
+
+                    System.out.println("Finished Initializing malePrefs for " + this.getSelf().path().name());
+                    // getSender().tell(Initialize.FINISHED, getSelf());
+
+                    // System.out.println("Finished Initializing malePrefs for " + this.getSelf());
+                    System.out.println(this.getSelf().path().name() + "'s Prefs; first value is the woman with the highest choice, then next highest, where n-1 is least wanted.");
+                    System.out.println("Eg: value in 0th index is 2 means the most attractive woman to that man is the second woman.");
+                    for (int i = 0; i < malePrefs.size(); i++) {
+                        System.out.print(getSelf().path().name() + " " + malePrefs.get(i) + " : ");
+                    }
+                    System.out.println("");
+                    System.out.println("- - - -");
+                    //-----------OPTIONAL---CODE----------------
+                    //TURN THIS ON IF YOU WANT CLEANER MALE PRINTS FOR THE ARRAYS
+                    //I have this off because I personally find it needless (and kind of not in the spirit of the 'first come first served'
+                    //format of the actors), but this code can be turned on
+                    //just note that if you do turn it on, you have to turn on the other bit of optional code as well.
+                    //(For your reference,that's line 311, the 'recieve' code for the males in main)
+                    //that will also be labeled similarly to this.
+
+//                    getSender().tell(Initialize.FINISHED, getSelf());
+//                   
+//                    Random rand = new Random();
+//                    //wait for all men to finish initializing, then send messages on a first come first served basis.
+//                    //this probably makes it a little more fair but whatever.
+//                    //this strikes a balance between the old way (that didn't wait for the men to initilize, but ended up
+//                    //with messy printouts and the fact that waiting will always cause the first man to have an advantage.
+//                    try {
+//                        Thread.sleep((rand.nextInt(2) + 3) * (males.size() *100) );
+//                    } catch (InterruptedException ex) {
+//                        Thread.currentThread().interrupt();
+//                    }
+
+                    //-----------END--OF--OPTIONAL---CODE---------------
+                }
+
+                // then initialize the first proposal
+                // this is a lot easier if we think of index(0) as the index with the highest
+                // 'attractiveness', with the value being the person with the highest attractiveness
+
+                indexLastProposed++;
+                females.get(malePrefs.get(indexLastProposed)-1).tell(new Proposal(getSelf()), getSelf());
+
+            } else if (message instanceof WomanResp) {
+                if (message == WomanResp.YES){
+                    //do nothing?
+                } else if (message == WomanResp.NO){
+                    if (indexLastProposed < malePrefs.size()){
+                        indexLastProposed++;
+                        females.get(malePrefs.get(indexLastProposed)-1).tell(new Proposal(getSelf()), getSelf());
+                    }
+                }
+            } else if (message instanceof Message){
+                if (message == Message.DUMP){
+                    if (indexLastProposed < malePrefs.size()){
+                        indexLastProposed++;
+                        females.get(malePrefs.get(indexLastProposed)-1).tell(new Proposal(getSelf()), getSelf());
+                    } 
+                }
+            }
+        }
+    }
+
+
+
+    public static class FemaleActor extends UntypedActor {
+        // this area has each the value of each man in an index
+        //completely opposite to malePrefs.. Kinda weird but it works? I think?
+        // eg: male-1 (at index 0) has rank 2, male-2 (at index 1) has rank 3 etc etc.
+        ArrayList<Integer> femalePrefs = new ArrayList<Integer>();
+
+        // this is just a set 'dummy' value to 'intialize'
+        ActorRef currentP = null;
+        //initialized to impossible values initially for init
+        int maleValue = 0;
+        int maleIndex = -1;
+
+
+        @Override
+        public void onReceive(Object message) throws Throwable {
+            // TODO Auto-generated method stub
+            // Start Message: Intialize stuff
+            if (message instanceof Initialize) {
+                if (message == Initialize.START) {
+
+                    int n = males.size();
+                    // then set random value from 1-n for each person of the opposite sex.
+
+                    for (int i = 1; i <= n; i++) {
+                        femalePrefs.add(i);
+                    }
+                    Collections.shuffle(femalePrefs);
+                    System.out.println(this.getSelf().path().name() + "'s Prefs; first value is the preference value of the first male, second value is the value of the second male, etc. the last value is the value of the last male created.");
+                    System.out.println("Eg: a value 3 in the 0th index of the array means the first man has a value of 3.");
+                    for (int i = 0; i < femalePrefs.size(); i++) {
+                        System.out.print(getSelf().path().name() + " " + femalePrefs.get(i) + " : ");
+                    }
+                    System.out.println("");
+                    System.out.println("- - - -");
+
+                }
+
+
+                getSender().tell(Initialize.FINISHED, getSelf());
+                System.out.println("Finished Initializing femalePrefs for " + this.getSelf().path().name());
+
+            } else if (message instanceof Proposal) {
+                if (((Proposal) message).message == "propose") {
+                    System.out.println("=========================");
+                    System.out.println(getSelf().path().name() + " Got message from " + ((Proposal) message).partner.path().name());
+                    System.out.println("=========================");
+                    // if the woman has no man yet, just set her up with the partner
+                    if (maleIndex == -1 && currentP == null) {
+                        //get the sender of the message, tell him the woman accepts
+                        getSender().tell(WomanResp.YES, getSelf());
+                        //set the woman's current parter to the one who sent the message
+                        currentP = ((Proposal) message).partner;
+
+                        // if the current partner is in the group of males (should always be, but
+                        // just in case) 
+                        if (males.contains(currentP)) {
+                            this.maleIndex = males.indexOf(currentP);
+                            this.maleValue = femalePrefs.get(maleIndex);
+                            System.out.println(this.getSelf().path().name()
+                                    + " : Index of proposed male:  " + maleIndex);
+                            System.out.println(this.getSelf().path().name()
+                                    + " Accepted Proposal from " + currentP.path().name()
+                                    + " with value " + femalePrefs.get(maleIndex));
+                            System.out.println("=========================");
+                         }
+                        //otherwise, if neither of these are true, we KNOW she has a man, and need to
+                        //act accordingly
+                    } else if (maleIndex != -1 && currentP != null) {
+                        // if the current partner is in the group of males (should always be, but
+                        // just in case) 
+                        if (males.contains(currentP)) {
+                            //get the index of both in the males array, so we can find their values
+                            int IndexOrig = maleIndex;
+                            int IndexProp = males.indexOf(((Proposal) message).partner);
+
+                            // if the original has a higher value then the proposed new one, say no!
+                            if (femalePrefs.get(IndexOrig) > femalePrefs.get(IndexProp)) {
+                                getSender().tell(WomanResp.NO, getSelf());
+                                System.out.println("Value of proposed: " + femalePrefs.get(IndexProp));
+                                System.out.println("Value of original: "+ femalePrefs.get(IndexOrig));
+                                System.out.println(getSelf().path().name() + " Stayed With "
+                                        + currentP.path().name());
+                                System.out.println("===============================");
+                            } else {
+                                // otherwise, tell the new man yes, dump the old man
+                                getSender().tell(WomanResp.YES, getSelf());
+                                currentP.tell(Message.DUMP, getSelf());
+                                System.out.println(getSelf().path().name() + " Dumped "
+                                        + currentP.path().name()+ " With Value " + this.maleValue);
+                                currentP = ((Proposal) message).partner;
+                                this.maleIndex = males.indexOf(currentP);
+                                this.maleValue = femalePrefs.get(maleIndex);
+                                System.out.println("For " + currentP.path().name() + " With value " + this.maleValue);
+                            }
+                        }
+                    } else {
+                        // I dunno why this is here?
+                        //this is just kind of here as another safety: This should never ever be used ever.
+                        getSender().tell(WomanResp.NO, getSelf());
+                    }
+                }
+            }
+        }
+    }
+
+
+
+    public static void main(String[] args) {
+        ActorSystem system = ActorSystem.create("StableMarriage");
+        // Prompt the user for an integer
+        int numPeople = 0;
+        Scanner in = new Scanner(System.in);
+        while (numPeople <= 0) {
+            System.out.print("Enter amount (int > 0) of men and women to be generated");
+            numPeople = in.nextInt();
+        }
+        in.close();
+
+
+
+        for (int i = 0; i < numPeople; i++) {
+            ActorRef man = system.actorOf(Props.create(MaleActor.class), "Man-" + (i+1));
+            System.out.println("Created Man-" + (i+1));
+            males.add(man);
+
+            ActorRef woman = system.actorOf(Props.create(FemaleActor.class), "Woman-" + (i+1));
+            System.out.println("Created Woman-" + (i+1));
+            females.add(woman);
+        }
+
+
+
+
+
+        // Create an inbox
+        final Inbox startBox = Inbox.create(system);
+
+
+        for (ActorRef a : females) {
+            startBox.send(a, Initialize.START);
+            try {
+                startBox.receive(Duration.create(5, TimeUnit.SECONDS));
+
+            } catch (TimeoutException e) {
+                System.out.println(
+                        "Got a timeout waiting for a reply from Woman actor initalization");
+            }
+            // trycatch
+        }
+
+        for (ActorRef b : males) {
+
+            startBox.send(b, Initialize.START);
+            //-----------OPTIONAL---CODE----------------
+            //TURN THIS ON IF YOU WANT CLEANER MALE PRINTS FOR THE ARRAYS
+            //I have this off because I personally find it needless (and kind of not in the spirit of the 'first come first served'
+            //format of the actors), but this code can be turned on
+            //just note that if you do turn it on, you have to turn on the other bit of optional code as well.
+            //(For your reference,that's line 87, near the end of the initialization code in the MaleActor)
+            //that will also be labeled similarly to this.
+            
+//            try {
+//                startBox.receive(Duration.create(5,TimeUnit.SECONDS));
+//
+//            } catch (TimeoutException e){
+//               System.out.println("Got a timeout waiting for a reply from Man actor initalization");
+//            }
+//            // startBox.send(b, );
+//            
+            //--------END-OF-OPTIONAL-CODE----------------
+        }
+        //Random rand = new Random();
+        try {
+            Thread.sleep((3) * (numPeople *1000) );
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+
+
+        // Shut down the system gracefully
+        system.terminate();
+
+    }
+
+
+}
